@@ -1,16 +1,23 @@
 import time
 
 import numpy as np
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from tensorboardX import SummaryWriter
 
 from src.Metrics import rmse
 
 
-class TrainBaseModel():
-    def __init__(self, train_data, n_unique_users, n_unique_businesses, latent_features, learning_rate,
-                 regularization_factor, log_session):
+def split_train_val(data):
+    return train_test_split(data, test_size=0.3, stratify=data.user_id_int)
+
+
+class MatrixFactorizationBasic:
+    def __init__(self, data, n_unique_users, n_unique_businesses, latent_features, learning_rate,
+                 regularization_factor, log_session, max_epochs):
         self.latent_features = latent_features
-        self.train_data = train_data
+        self.train_data, self.val_data = split_train_val(data)
+
         self.w_user_latent_matrix = np.random.rand(n_unique_users, latent_features)
         self.w_business_latent_matrix = np.random.rand(latent_features, n_unique_businesses)
 
@@ -20,11 +27,19 @@ class TrainBaseModel():
         self.learning_rate = learning_rate
         self.regularization_factor = regularization_factor
         self.log_session = log_session
-        self.graph = self.log_session.graph('err', kind='min')
+        self.max_epochs = max_epochs
+
+        self.inner_epoch_err = [self.log_session.graph(f'train_epoch_{idx}') for idx in range(self.max_epochs)]
+        self.epoch_graph = self.log_session.graph('epoch_err', display_interval=1)
 
     def predict_user_business(self, user_index, business_index):
-        return np.dot(self.w_user_latent_matrix[user_index], self.w_business_latent_matrix[:, business_index]) + \
-               self.w_user_bias[user_index] + self.w_business_bias[business_index]
+        if user_index.size > 1:
+            return np.sum(self.w_user_latent_matrix[user_index] * self.w_business_latent_matrix[:, business_index].T,
+                          axis=1) + \
+                   self.w_user_bias[user_index] + self.w_business_bias[business_index]
+        else:
+            return np.dot(self.w_user_latent_matrix[user_index], self.w_business_latent_matrix[:, business_index]) + \
+                   self.w_user_bias[user_index] + self.w_business_bias[business_index]
 
     def calculate_error(self, user_index, business_index, true_val):
         predicted_val = self.predict_user_business(user_index, business_index)
@@ -53,20 +68,30 @@ class TrainBaseModel():
         return err
 
     def train(self):
-        row_order = np.arange(len(self.train_data))
-        np.random.shuffle(row_order)
-        all_errs = []
+        last_val_error = np.inf
+        patience_counter = 0
 
-        for idx, curr_idx in tqdm(enumerate(row_order)):
-            err = self.step(curr_idx)
+        for epoch_idx in range(self.max_epochs):
+            row_order = np.arange(len(self.train_data))
+            np.random.shuffle(row_order)
+            batch_train_errs = []
+            all_train_errs = []
 
-            all_errs.append(err)
+            for log_idx, curr_idx in enumerate(tqdm(row_order)):
+                log_idx += 1
+                err = self.step(curr_idx)
+                all_train_errs.append(err)
+                batch_train_errs.append(err)
 
-            if (idx + 1) % 1000 == 0:
-                self.graph.append(idx // 1000, {'err': np.mean(np.abs(all_errs))})
-                all_errs = []
+                if (log_idx + 1) % 1000 == 0:
+                    self.inner_epoch_err[epoch_idx].append(log_idx, {'train_err': rmse(batch_train_errs)})
+                    batch_train_errs.clear()
 
-        self.log_session.done()
+            val_err = self.calculate_validation_err()
+            train_err = rmse(all_train_errs)
+            self.epoch_graph.append(epoch_idx + 1, {'train_err': train_err, 'validation_err': val_err})
 
-    def split_to_train_validation(self):
-        pass
+    def calculate_validation_err(self):
+        all_errs = self.calculate_error(self.val_data.user_id_int, self.val_data.business_id_int, self.val_data.stars)
+        return rmse(all_errs)
+

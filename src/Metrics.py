@@ -1,5 +1,6 @@
 import numpy as np
 
 
-def rmse(true_val, preds):
-    return np.sum((true_val - preds) ** 2)
+def rmse(vals):
+    vals = np.array(vals)
+    return np.sqrt(np.mean(vals ** 2))
