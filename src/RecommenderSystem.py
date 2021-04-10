@@ -1,5 +1,6 @@
 import time
-
+from collections import Iterable
+import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -43,11 +44,16 @@ class MatrixFactorizationBasic:
                    self.w_user_bias[user_index] + self.w_business_bias[business_index]
 
     def calculate_error(self, user_index, business_index, true_val):
-        predicted_val = self.predict_user_business(user_index, business_index)
-        return true_val - predicted_val
+        if type(user_index) is pd.Series:
+            all_errs = []
+            for curr_user_index,curr_business_index, curr_true_val in zip(user_index, business_index, true_val):
+                all_errs.append(curr_true_val - self.predict_user_business(curr_user_index, curr_business_index))
+            return all_errs
+        else:
+            return true_val - self.predict_user_business(user_index, business_index)
 
     def update_rule(self, err, main_values, secondary_values):
-        return main_values + self.learning_rate * (err * secondary_values - self.regularization_factor * main_values)
+        return self.learning_rate * (err * secondary_values - self.regularization_factor * main_values)
 
     def step(self, idx):
         curr_row = self.train_data.iloc[idx]
@@ -56,15 +62,17 @@ class MatrixFactorizationBasic:
         real_rank = curr_row.stars
 
         err = self.calculate_error(curr_user_idx, curr_business_idx, real_rank)
+
         curr_user_latent = self.w_user_latent_matrix[curr_user_idx]
         curr_business_latent = self.w_business_latent_matrix[:, curr_business_idx]
-        self.w_user_latent_matrix[curr_user_idx] = self.update_rule(err, curr_user_latent, curr_business_latent)
-        self.w_business_latent_matrix[:, curr_business_idx] = self.update_rule(err, curr_business_latent,
+
+        self.w_user_latent_matrix[curr_user_idx] += self.update_rule(err, curr_user_latent, curr_business_latent)
+        self.w_business_latent_matrix[:, curr_business_idx] += self.update_rule(err, curr_business_latent,
                                                                                curr_user_latent)
         curr_user_bias = self.w_user_bias[curr_user_idx]
         curr_business_bias = self.w_business_bias[curr_business_idx]
-        self.w_user_bias[curr_user_idx] = self.update_rule(err, curr_user_bias, 1)
-        self.w_business_bias[curr_business_idx] = self.update_rule(err, curr_business_bias, 1)
+        self.w_user_bias[curr_user_idx] += self.update_rule(err, curr_user_bias, 1)
+        self.w_business_bias[curr_business_idx] += self.update_rule(err, curr_business_bias, 1)
 
         return err
 
@@ -111,14 +119,9 @@ class MatrixFactorizationImproved(MatrixFactorizationBasic):
         b_ui = self.w_user_bias[user_index] + self.w_business_bias[business_index] + self.train_data_average_stars
         curr_R = self.R[user_index]
 
-        if user_index.size > 1:
-            # TODO implement this part
-            return np.sum(self.w_user_latent_matrix[user_index] * self.w_business_latent_matrix[:, business_index].T,
-                          axis=1) + b_ui
-        else:
-            user_representation = self.w_user_latent_matrix[user_index] + (len(curr_R) ** -0.5) * self.w_y[curr_R].sum(
-                axis=0)
-            return np.dot(user_representation, self.w_business_latent_matrix[:, business_index]) + b_ui
+        user_representation = self.w_user_latent_matrix[user_index] + (len(curr_R) ** -0.5) * self.w_y[curr_R].sum(
+            axis=0)
+        return np.dot(user_representation, self.w_business_latent_matrix[:, business_index]) + b_ui
 
     def step(self, idx):
         curr_row = self.train_data.iloc[idx]
@@ -135,14 +138,14 @@ class MatrixFactorizationImproved(MatrixFactorizationBasic):
         user_representation = curr_user_latent + (len(curr_R) ** -0.5) * self.w_y[curr_R].sum(axis=0)
 
 
-        self.w_user_latent_matrix[curr_user_idx] = self.update_rule(err, user_representation, curr_business_latent)
-        self.w_business_latent_matrix[:, curr_business_idx] = self.update_rule(err, curr_business_latent,
+        self.w_user_latent_matrix[curr_user_idx] += self.update_rule(err, user_representation, curr_business_latent)
+        self.w_business_latent_matrix[:, curr_business_idx] += self.update_rule(err, curr_business_latent,
                                                                                curr_user_latent)
         curr_user_bias = self.w_user_bias[curr_user_idx]
         curr_business_bias = self.w_business_bias[curr_business_idx]
-        self.w_user_bias[curr_user_idx] = self.update_rule(err, curr_user_bias, 1)
-        self.w_business_bias[curr_business_idx] = self.update_rule(err, curr_business_bias, 1)
+        self.w_user_bias[curr_user_idx] += self.update_rule(err, curr_user_bias, 1)
+        self.w_business_bias[curr_business_idx] += self.update_rule(err, curr_business_bias, 1)
 
-        self.w_y[curr_R] = self.update_rule(err, self.w_y[curr_R], (len(curr_R) ** -0.5) * curr_business_latent)
+        self.w_y[curr_R] += self.update_rule(err, self.w_y[curr_R], (len(curr_R) ** -0.5) * curr_business_latent)
 
         return err

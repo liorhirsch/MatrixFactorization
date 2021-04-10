@@ -37,19 +37,19 @@ def main(learning_rate, regularization_factor, latent_features, max_epochs):
 
     print("Starting Training")
 
-    # losswise.set_api_key('W20EQ09CW')
-    # session = losswise.Session(tag='matrix_factorization',
-    #                            max_iter=10000,
-    #                            params={'learning rate': learning_rate,
-    #                                    'regularization': regularization_factor,
-    #                                    'latent_features': latent_features,
-    #                                    'max_epochs': max_epochs})
+    losswise.set_api_key('W20EQ09CW')
+    session = losswise.Session(tag='matrix_factorization_improved',
+                               max_iter=10000,
+                               params={'learning rate': learning_rate,
+                                       'regularization': regularization_factor,
+                                       'latent_features': latent_features,
+                                       'max_epochs': max_epochs})
 
     mf_model = MatrixFactorizationImproved(data=train_df, n_unique_users=n_unique_users, n_unique_businesses=n_unique_businesses, latent_features=latent_features,
                                         learning_rate=learning_rate, regularization_factor=regularization_factor,
-                                        max_epochs=max_epochs)
+                                        max_epochs=max_epochs, log_session= session)
     mf_model.train()
-    # session.done()
+    session.done()
 
 
 def extract_args_from_cmd():
